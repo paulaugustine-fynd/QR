@@ -21,9 +21,10 @@
 .logo-size-options button.active{background:var(--ink);color:white}
 .design-controls .field>small{display:block;color:#8b8b90;font-size:11px;margin-top:8px}
 .row-actions{gap:4px}
-.row-actions button{width:34px;height:34px;display:grid;place-items:center;border:1px solid transparent}
-.row-actions button:hover{background:white;border-color:var(--line);color:var(--ink)}
-.row-actions button:active{transform:scale(.94)}
+.row-actions button,.row-actions a{width:34px;height:34px;display:grid;place-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:#999;text-decoration:none;transition:background .2s,border-color .2s,color .2s,transform .15s}
+.row-actions button:hover,.row-actions a:hover{background:white;border-color:var(--line);color:var(--ink)}
+.row-actions button:active,.row-actions a:active{transform:scale(.94)}
+.row-actions a svg{width:16px}
 .toast{background:white;color:var(--ink);border:1px solid var(--line);box-shadow:0 4px 16px rgba(0,0,0,.08)}
 .toast svg{color:#198754}
 
