@@ -8,7 +8,8 @@ const FYND_PATH = "M30.872 4.243 27.019 1.043c-1.67-1.389-4.095-1.389-5.765 0l-4
 
 type QrType = "single" | "multi" | "vcard";
 type ActiveQrType = "single" | "vcard";
-type SavedQr = { id: string; name: string; type: QrType; destination: string; created: string };
+type LogoSize = "small" | "medium" | "large";
+type SavedQr = { id: string; name: string; type: QrType; destination: string; payload?: string; color?: string; logoSize?: LogoSize; created: string };
 
 function FyndMark({ inverse = false }: { inverse?: boolean }) {
   return <svg aria-label="Fynd" className="fynd-mark" viewBox="0 0 33.178 32"><path d={FYND_PATH} fill={inverse ? "white" : "currentColor"}/></svg>;
@@ -19,7 +20,7 @@ function StatQr() {
 }
 
 function SignIn({ onSuccess }: { onSuccess: (email: string) => void }) {
-  const [email, setEmail] = useState("paul@gofynd.com");
+  const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -43,7 +44,7 @@ function SignIn({ onSuccess }: { onSuccess: (email: string) => void }) {
   </main>;
 }
 
-function QRCanvas({ value, color, canvasRef }: { value: string; color: string; canvasRef: React.RefObject<HTMLCanvasElement | null> }) {
+function QRCanvas({ value, color, logoSize, canvasRef }: { value: string; color: string; logoSize: LogoSize; canvasRef: React.RefObject<HTMLCanvasElement | null> }) {
   useEffect(() => {
     let live = true;
     const render = async () => {
@@ -52,12 +53,18 @@ function QRCanvas({ value, color, canvasRef }: { value: string; color: string; c
       if (!live || !canvasRef.current) return;
       const ctx = canvasRef.current.getContext("2d");
       if (!ctx) return;
-      const cx = 280, cy = 280, plate = 126, markWidth = 82, markHeight = 79;
+      const logoSizes = {
+        small: { plate: 86, width: 52, height: 50 },
+        medium: { plate: 108, width: 70, height: 68 },
+        large: { plate: 130, width: 86, height: 83 },
+      };
+      const cx = 280, cy = 280;
+      const { plate, width: markWidth, height: markHeight } = logoSizes[logoSize];
       ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.roundRect(cx - plate / 2, cy - plate / 2, plate, plate, 26); ctx.fill();
-      ctx.save(); ctx.translate(cx - markWidth / 2, cy - markHeight / 2); ctx.scale(markWidth / 33.178, markHeight / 32); ctx.fillStyle = "#3535F3"; ctx.fill(new Path2D(FYND_PATH)); ctx.restore();
+      ctx.save(); ctx.translate(cx - markWidth / 2, cy - markHeight / 2); ctx.scale(markWidth / 33.178, markHeight / 32); ctx.fillStyle = "#0E0E0E"; ctx.fill(new Path2D(FYND_PATH)); ctx.restore();
     };
     render(); return () => { live = false; };
-  }, [value, color, canvasRef]);
+  }, [value, color, logoSize, canvasRef]);
   return <canvas ref={canvasRef} aria-label="Generated QR code preview"/>;
 }
 
@@ -67,6 +74,7 @@ function Dashboard({ user, onSignOut }: { user: string; onSignOut: () => void })
   const [singleUrl, setSingleUrl] = useState("https://www.fynd.com");
   const [contact, setContact] = useState({ name: "", company: "", email: "", phone: "" });
   const [color, setColor] = useState("#0E0E0E");
+  const [logoSize, setLogoSize] = useState<LogoSize>("medium");
   const [saved, setSaved] = useState<SavedQr[]>([]);
   const [toast, setToast] = useState("");
   const [view, setView] = useState<"create" | "library">("create");
@@ -87,12 +95,48 @@ function Dashboard({ user, onSignOut }: { user: string; onSignOut: () => void })
   const flash = useCallback((message: string) => { setToast(message); window.setTimeout(() => setToast(""), 2200); }, []);
   const saveQr = () => {
     if (!isValid) return flash(type === "single" ? "Enter a valid URL including https://" : "Add a name, valid email, and phone number");
-    const item: SavedQr = { id: crypto.randomUUID(), name: name || "Untitled QR", type, destination: type === "single" ? singleUrl : `${contact.name}${contact.company ? ` · ${contact.company}` : ""}`, created: new Date().toISOString() };
+    const item: SavedQr = { id: crypto.randomUUID(), name: name || "Untitled QR", type, destination: type === "single" ? singleUrl : `${contact.name}${contact.company ? ` · ${contact.company}` : ""}`, payload: value, color, logoSize, created: new Date().toISOString() };
     const next = [item, ...saved]; setSaved(next); localStorage.setItem("fynd-qr-library", JSON.stringify(next)); flash("QR saved to your library");
   };
   const download = () => {
     if (!isValid || !canvasRef.current) return flash("Add a valid destination first");
     const anchor = document.createElement("a"); anchor.download = `${(name || "fynd-qr").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.png`; anchor.href = canvasRef.current.toDataURL("image/png"); anchor.click(); flash("High-resolution PNG downloaded");
+  };
+  const copySavedQr = async (item: SavedQr) => {
+    try {
+      await navigator.clipboard.writeText(item.payload || item.destination);
+      flash(item.type === "vcard" ? "Contact information copied" : "Destination link copied");
+    } catch {
+      flash("Could not copy this QR");
+    }
+  };
+  const openSavedQr = (item: SavedQr) => {
+    if (item.type === "single" && /^https?:\/\//i.test(item.destination)) {
+      const anchor = document.createElement("a");
+      anchor.href = item.destination;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.click();
+      flash("Destination opened in a new tab");
+      return;
+    }
+    if (item.type === "vcard" && item.payload) {
+      const objectUrl = URL.createObjectURL(new Blob([item.payload], { type: "text/vcard;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `${item.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "contact"}.vcf`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      flash("Contact card downloaded");
+      return;
+    }
+    flash("This older saved QR has no downloadable contact data");
+  };
+  const deleteSavedQr = (id: string) => {
+    const next = saved.filter(q => q.id !== id);
+    setSaved(next);
+    localStorage.setItem("fynd-qr-library", JSON.stringify(next));
+    flash("QR deleted");
   };
 
   const changeView = (next: "create" | "library") => { setView(next); setMobileNavOpen(false); };
@@ -102,17 +146,20 @@ function Dashboard({ user, onSignOut }: { user: string; onSignOut: () => void })
     {mobileNavOpen && <button className="nav-scrim" aria-label="Close menu" onClick={() => setMobileNavOpen(false)}/>}
     <section className="workspace"><header><div><button className="menu-button" aria-label="Open menu" onClick={() => setMobileNavOpen(true)}><Menu/></button><span>{view === "create" ? "Create QR code" : "My QR codes"}</span></div><div className="status"><span></span> All systems operational</div></header>
       {view === "create" ? <div className="builder"><div className="builder-head"><div><span className="kicker">QR builder</span><h1>Make your next scan count.</h1><p>Choose a destination, add your touch, and download.</p></div><div className="step-pill"><span>1</span> Destination <i/> <span>2</span> Design <i/> <span>3</span> Download</div></div>
-        <div className="builder-grid"><div className="config-card"><div className="type-tabs"><button className={type === "single" ? "active" : ""} onClick={() => setType("single")}><Link2 size={18}/> Single link</button><button className="coming-soon-tab" disabled aria-disabled="true"><Menu size={18}/> Multi link <span>Coming soon</span></button><button className={type === "vcard" ? "active" : ""} onClick={() => setType("vcard")}><Contact size={18}/> Virtual card</button></div><div className="form-body"><div className="field"><label>QR name</label><input value={name} onChange={e => setName(e.target.value)} placeholder={type === "vcard" ? "e.g. My contact card" : "e.g. Store launch"}/></div>{type === "single" ? <div className="field"><label>Destination URL</label><div className="url-input"><Link2 size={18}/><input value={singleUrl} onChange={e => setSingleUrl(e.target.value)} placeholder="https://example.com"/></div><small>Use a complete URL including https://</small></div> : <div className="vcard-editor"><div className="field-label"><label>Contact information</label><small>Saved as a vCard</small></div><div className="contact-fields"><div className="field"><label htmlFor="contact-name">Full name</label><input id="contact-name" value={contact.name} onChange={e => setContact({...contact, name:e.target.value})} placeholder="e.g. Aisha Shah" autoComplete="name"/></div><div className="field"><label htmlFor="contact-company">Company name</label><input id="contact-company" value={contact.company} onChange={e => setContact({...contact, company:e.target.value})} placeholder="e.g. Fynd" autoComplete="organization"/></div><div className="field"><label htmlFor="contact-email">Email</label><input id="contact-email" type="email" value={contact.email} onChange={e => setContact({...contact, email:e.target.value})} placeholder="aisha@gofynd.com" autoComplete="email"/></div><div className="field"><label htmlFor="contact-phone">Phone number</label><input id="contact-phone" type="tel" value={contact.phone} onChange={e => setContact({...contact, phone:e.target.value})} placeholder="+91 98765 43210" autoComplete="tel"/></div></div><div className="vcard-note"><Contact size={16}/><span>When scanned, the phone will offer to add this person to contacts.</span></div></div>}<div className="divider"/><div className="field"><label>QR colour</label><div className="swatches">{["#0E0E0E", "#3535F3", "#000093", "#9747FF"].map(c => <button key={c} aria-label={`Use colour ${c}`} className={color === c ? "selected" : ""} style={{background:c}} onClick={() => setColor(c)}>{color === c && <Check size={15}/>}</button>)}<div className="hex">{color}<ChevronDown size={15}/></div></div></div></div></div>
-          <div className="preview-card"><div className="preview-top"><div><span>Live preview</span><small>Updates as you type</small></div><button aria-label="More options"><MoreHorizontal/></button></div><div className="qr-stage"><div className="qr-paper"><QRCanvas value={isValid ? value : "https://www.fynd.com"} color={color} canvasRef={canvasRef}/></div><div className="scan-line"><span/><p>{name || "Untitled QR"}</p><small>{type === "single" ? "Single destination" : "Downloadable contact"} · Never expires</small></div></div><div className="preview-actions"><button className="secondary" onClick={saveQr}><QrCode size={18}/> Save QR</button><button className="primary" onClick={download}><Download size={18}/> Download PNG</button></div></div></div>
+        <div className="builder-grid"><div className="config-card"><div className="type-tabs"><button className={type === "single" ? "active" : ""} onClick={() => setType("single")}><Link2 size={18}/> Single link</button><button className="coming-soon-tab" disabled aria-disabled="true"><Menu size={18}/> Multi link <span>Coming soon</span></button><button className={type === "vcard" ? "active" : ""} onClick={() => setType("vcard")}><Contact size={18}/> Virtual card</button></div><div className="form-body"><div className="field"><label>QR name</label><input value={name} onChange={e => setName(e.target.value)} placeholder={type === "vcard" ? "e.g. My contact card" : "e.g. Store launch"}/></div>{type === "single" ? <div className="field"><label>Destination URL</label><div className="url-input"><Link2 size={18}/><input value={singleUrl} onChange={e => setSingleUrl(e.target.value)} placeholder="https://example.com"/></div><small>Use a complete URL including https://</small></div> : <div className="vcard-editor"><div className="field-label"><label>Contact information</label><small>Saved as a vCard</small></div><div className="contact-fields"><div className="field"><label htmlFor="contact-name">Full name</label><input id="contact-name" value={contact.name} onChange={e => setContact({...contact, name:e.target.value})} placeholder="e.g. Aisha Shah" autoComplete="name"/></div><div className="field"><label htmlFor="contact-company">Company name</label><input id="contact-company" value={contact.company} onChange={e => setContact({...contact, company:e.target.value})} placeholder="e.g. Fynd" autoComplete="organization"/></div><div className="field"><label htmlFor="contact-email">Email</label><input id="contact-email" type="email" value={contact.email} onChange={e => setContact({...contact, email:e.target.value})} placeholder="aisha@gofynd.com" autoComplete="email"/></div><div className="field"><label htmlFor="contact-phone">Phone number</label><input id="contact-phone" type="tel" value={contact.phone} onChange={e => setContact({...contact, phone:e.target.value})} placeholder="+91 98765 43210" autoComplete="tel"/></div></div><div className="vcard-note"><Contact size={16}/><span>When scanned, the phone will offer to add this person to contacts.</span></div></div>}<div className="divider"/><div className="design-controls"><div className="field"><label>QR colour</label><div className="swatches">{["#0E0E0E", "#3535F3", "#000093", "#9747FF"].map(c => <button key={c} aria-label={`Use colour ${c}`} className={color === c ? "selected" : ""} style={{background:c}} onClick={() => setColor(c)}>{color === c && <Check size={15}/>}</button>)}<div className="hex">{color}<ChevronDown size={15}/></div></div></div><div className="field"><label>Center logo size</label><div className="logo-size-options" role="radiogroup" aria-label="Center logo size">{(["small", "medium", "large"] as LogoSize[]).map(size => <button key={size} type="button" role="radio" aria-checked={logoSize === size} className={logoSize === size ? "active" : ""} onClick={() => setLogoSize(size)}>{size}</button>)}</div><small>The Fynd logo always stays black.</small></div></div></div></div>
+          <div className="preview-card"><div className="preview-top"><div><span>Live preview</span><small>Updates as you type</small></div><button aria-label="More options"><MoreHorizontal/></button></div><div className="qr-stage"><div className="qr-paper"><QRCanvas value={isValid ? value : "https://www.fynd.com"} color={color} logoSize={logoSize} canvasRef={canvasRef}/></div><div className="scan-line"><span/><p>{name || "Untitled QR"}</p><small>{type === "single" ? "Single destination" : "Downloadable contact"} · Never expires</small></div></div><div className="preview-actions"><button className="secondary" onClick={saveQr}><QrCode size={18}/> Save QR</button><button className="primary" onClick={download}><Download size={18}/> Download PNG</button></div></div></div>
         <div className="assurance"><div><Check/><span><strong>Lifetime validity</strong><small>Direct, non-expiring QR data</small></span></div><div><Sparkles/><span><strong>Fynd branded</strong><small>Official mark on every code</small></span></div><div><QrCode/><span><strong>Unlimited scans</strong><small>No counters or usage caps</small></span></div></div>
-      </div> : <Library saved={saved} onDelete={(id) => { const next = saved.filter(q => q.id !== id); setSaved(next); localStorage.setItem("fynd-qr-library", JSON.stringify(next)); }} onCreate={() => setView("create")}/>} </section>{toast && <div className="toast"><Check size={17}/>{toast}</div>}
+      </div> : <Library saved={saved} onDelete={deleteSavedQr} onCopy={copySavedQr} onOpen={openSavedQr} onCreate={() => setView("create")}/>} </section>{toast && <div className="toast" role="status" aria-live="polite"><Check size={17}/>{toast}</div>}
   </div>;
 }
 
-function Library({ saved, onDelete, onCreate }: { saved: SavedQr[]; onDelete: (id: string) => void; onCreate: () => void }) {
+function Library({ saved, onDelete, onCopy, onOpen, onCreate }: { saved: SavedQr[]; onDelete: (id: string) => void; onCopy: (item: SavedQr) => void; onOpen: (item: SavedQr) => void; onCreate: () => void }) {
   const [query, setQuery] = useState("");
-  const results = saved.filter(q => q.name.toLowerCase().includes(query.toLowerCase()));
-  return <div className="library"><div className="library-head"><div><span className="kicker">Your collection</span><h1>QR codes that keep working.</h1><p>Everything you create stays ready for the next scan.</p></div><button className="primary" onClick={onCreate}><Plus size={18}/> Create QR</button></div><div className="library-tools"><div className="search"><Search size={18}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search QR codes"/></div><button className="filter">All types <ChevronDown size={16}/></button></div>{results.length ? <div className="qr-table"><div className="table-row table-head"><span>Name</span><span>Type</span><span>Created</span><span/></div>{results.map(item => <div className="table-row" key={item.id}><span className="qr-name"><span className="mini-qr">{item.type === "vcard" ? <Contact/> : <QrCode/>}</span><span><strong>{item.name}</strong><small>{item.destination}</small></span></span><span><span className="type-badge">{item.type === "single" ? "Single link" : item.type === "multi" ? "Multi link" : "Virtual card"}</span></span><span>{new Date(item.created).toLocaleDateString(undefined, {day:"numeric", month:"short", year:"numeric"})}</span><span className="row-actions"><button aria-label="Copy destination" onClick={() => navigator.clipboard.writeText(item.destination)}><Copy/></button><button aria-label="Open destination"><ExternalLink/></button><button aria-label="Delete QR" onClick={() => onDelete(item.id)}><Trash2/></button></span></div>)}</div> : <div className="empty-state"><div><QrCode/></div><h2>No QR codes yet</h2><p>Create your first branded QR code in under a minute.</p><button className="primary" onClick={onCreate}>Create your first QR <ArrowRight size={18}/></button></div>}</div>;
+  const [filter, setFilter] = useState<"all" | "single" | "vcard">("all");
+  const results = saved.filter(q => q.name.toLowerCase().includes(query.toLowerCase()) && (filter === "all" || q.type === filter));
+  const cycleFilter = () => setFilter(current => current === "all" ? "single" : current === "single" ? "vcard" : "all");
+  const filterLabel = filter === "all" ? "All types" : filter === "single" ? "Single link" : "Virtual card";
+  return <div className="library"><div className="library-head"><div><span className="kicker">Your collection</span><h1>QR codes that keep working.</h1><p>Everything you create stays ready for the next scan.</p></div><button className="primary" onClick={onCreate}><Plus size={18}/> Create QR</button></div><div className="library-tools"><div className="search"><Search size={18}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search QR codes"/></div><button className="filter" onClick={cycleFilter} aria-label={`Filter QR codes. Currently ${filterLabel}`}>{filterLabel} <ChevronDown size={16}/></button></div>{results.length ? <div className="qr-table"><div className="table-row table-head"><span>Name</span><span>Type</span><span>Created</span><span/></div>{results.map(item => <div className="table-row" key={item.id}><span className="qr-name"><span className="mini-qr">{item.type === "vcard" ? <Contact/> : <QrCode/>}</span><span><strong>{item.name}</strong><small>{item.destination}</small></span></span><span><span className="type-badge">{item.type === "single" ? "Single link" : item.type === "multi" ? "Multi link" : "Virtual card"}</span></span><span>{new Date(item.created).toLocaleDateString(undefined, {day:"numeric", month:"short", year:"numeric"})}</span><span className="row-actions"><button title="Copy QR data" aria-label="Copy QR data" onClick={() => onCopy(item)}><Copy/></button><button title={item.type === "vcard" ? "Download contact card" : "Open destination"} aria-label={item.type === "vcard" ? "Download contact card" : "Open destination"} onClick={() => onOpen(item)}><ExternalLink/></button><button title="Delete QR" aria-label="Delete QR" onClick={() => onDelete(item.id)}><Trash2/></button></span></div>)}</div> : <div className="empty-state"><div><QrCode/></div><h2>No matching QR codes</h2><p>Try another search or filter, or create a new QR.</p><button className="primary" onClick={onCreate}>Create a QR <ArrowRight size={18}/></button></div>}</div>;
 }
 
 export default function Home() {
