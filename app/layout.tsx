@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Fynd QR — links that last",
-  description: "Create branded single-link and multi-link QR codes with lifetime validity.",
+  description: "Create Fynd-branded link and virtual-card QR codes with lifetime validity.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
